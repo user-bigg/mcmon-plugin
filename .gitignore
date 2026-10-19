@@ -1,0 +1,11 @@
+build/
+.gradle/
+.kotlin/
+/out/
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+.env
+.idea/
+.vscode/
+.DS_Store
+/run/

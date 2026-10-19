@@ -1,0 +1,452 @@
+#!/usr/bin/env python3
+"""Checks that every Minecraft class, member and mixin target the client mod jars use exists in each game version
+of their line: intermediary mappings for 1.14-1.21.11, the client jars themselves for unobfuscated 26.x.
+
+    scripts/mixin-targets            check the jars of the project version in client-fabric/*/build/libs
+Downloads are cached in $MCMONITOR_CACHE (default ~/.cache/mcmonitor) and checked against their sha1.
+"""
+
+import hashlib
+import io
+import json
+import os
+import re
+import struct
+import sys
+import urllib.request
+import zipfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+CACHE = Path(os.environ.get("MCMONITOR_CACHE", Path.home() / ".cache" / "mcmonitor")) / "mixin-targets"
+GAME_VERSIONS = "https://meta.fabricmc.net/v2/versions/game"
+INTERMEDIARY = "https://maven.fabricmc.net/net/fabricmc/intermediary/{0}/intermediary-{0}-v2.jar"
+MOJANG_MANIFEST = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
+
+LINES = {
+    "mc1.14": {"from": "1.14", "to": "1.20.1", "only": {"ConnectScreenLegacyMixin": ("1.14", "1.16.5"), "ConnectScreenMixin": ("1.17", None)}},
+    "mc1.20.2": {"from": "1.20.2", "to": "1.21.11", "only": {}},
+    "mc26.1": {"from": "26.1", "to": None, "only": {}},
+}
+MIXIN = "org/spongepowered/asm/mixin/"
+INTERMEDIARY_MEMBER = re.compile(r"^(method|field|comp)_\d+$")
+SPECIAL_METHODS = ("<init>", "<clinit>")
+MADE_UP = {"intermediary": ("net/minecraft/class_635", "method_999999999", "field_999999999"),
+           "client": ("net/minecraft/client/multiplayer/ClientHandshakePacketListenerImpl", "mcmonitorMadeUp", "mcmonitorMadeUp")}
+
+
+def version_key(version):
+    return tuple(int(part) for part in version.split("."))
+
+
+def in_range(version, low, high):
+    key = version_key(version)
+    return key >= version_key(low) and (high is None or key <= version_key(high))
+
+
+def project_version():
+    match = re.search(r'^\s*version\s*=\s*"([^"]+)"', (ROOT / "build.gradle.kts").read_text(), re.MULTILINE)
+    if not match:
+        raise SystemExit("mixin-targets: no project version in build.gradle.kts")
+    return match.group(1)
+
+
+def download(url, timeout=60):
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            return response.read()
+    except OSError as error:
+        raise SystemExit(f"mixin-targets: cannot download {url} ({error}) and it is not in the cache {CACHE}. "
+                         "Run once with network access, or point MCMONITOR_CACHE to a filled cache.") from None
+
+
+def store(target, data):
+    target.parent.mkdir(parents=True, exist_ok=True)
+    partial = target.with_suffix(target.suffix + ".part")
+    partial.write_bytes(data)
+    partial.replace(target)
+
+
+def fetch(url, target, sha1=None):
+    if target.exists() and (sha1 is None or hashlib.sha1(target.read_bytes()).hexdigest() == sha1):
+        return target
+    data = download(url)
+    if sha1 is not None and hashlib.sha1(data).hexdigest() != sha1:
+        raise SystemExit(f"mixin-targets: {url} failed its sha1 check")
+    store(target, data)
+    return target
+
+
+def fetch_published_sha1(url, target):
+    sha1_file = target.with_name(target.name + ".sha1")
+    if not sha1_file.exists():
+        store(sha1_file, download(url + ".sha1", timeout=30))
+    sha1 = sha1_file.read_text().split()[0].strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{40}", sha1):
+        sha1_file.unlink()
+        raise SystemExit(f"mixin-targets: {url}.sha1 is not a sha1, run again")
+    return fetch(url, target, sha1)
+
+
+def fetch_json(url, name):
+    target = CACHE / name
+    try:
+        with urllib.request.urlopen(url, timeout=30) as response:
+            store(target, response.read())
+    except OSError as error:
+        if not target.exists():
+            raise SystemExit(f"mixin-targets: cannot download {url} ({error}) and it is not in the cache {CACHE}. "
+                             "Run once with network access, or point MCMONITOR_CACHE to a filled cache.") from None
+    return json.loads(target.read_bytes())
+
+
+class ClassFile:
+    def __init__(self, data):
+        self.data = data
+        self.pos = 8
+        self.pool = [None]
+        count = self.u2()
+        index = 1
+        while index < count:
+            tag = self.u1()
+            if tag == 1:
+                length = self.u2()
+                self.pool.append(("utf8", data[self.pos:self.pos + length].decode("utf-8", "replace")))
+                self.pos += length
+            elif tag in (3, 4):
+                self.pool.append(("num", None))
+                self.pos += 4
+            elif tag in (5, 6):
+                self.pool.append(("num", None))
+                self.pool.append(None)
+                self.pos += 8
+                index += 1
+            elif tag in (7, 8, 16, 19, 20):
+                self.pool.append((tag, self.u2()))
+            elif tag in (9, 10, 11, 12, 17, 18):
+                self.pool.append((tag, self.u2(), self.u2()))
+            elif tag == 15:
+                self.pool.append((tag, self.u1(), self.u2()))
+            else:
+                raise ValueError(f"unknown constant pool tag {tag}")
+            index += 1
+        self.access = self.u2()
+        self.name = self.class_name(self.u2())
+        super_index = self.u2()
+        self.super = self.class_name(super_index) if super_index else None
+        self.interfaces = [self.class_name(self.u2()) for _ in range(self.u2())]
+        self.fields = [self.member() for _ in range(self.u2())]
+        self.methods = [self.member() for _ in range(self.u2())]
+        self.annotations = self.attributes_annotations()
+
+    def u1(self):
+        value = self.data[self.pos]
+        self.pos += 1
+        return value
+
+    def u2(self):
+        value = struct.unpack_from(">H", self.data, self.pos)[0]
+        self.pos += 2
+        return value
+
+    def utf8(self, index):
+        return self.pool[index][1]
+
+    def class_name(self, index):
+        return self.utf8(self.pool[index][1])
+
+    def member(self):
+        access = self.u2()
+        name = self.utf8(self.u2())
+        desc = self.utf8(self.u2())
+        return {"access": access, "name": name, "desc": desc, "annotations": self.attributes_annotations()}
+
+    def attributes_annotations(self):
+        found = {}
+        for _ in range(self.u2()):
+            name = self.utf8(self.u2())
+            length = struct.unpack_from(">I", self.data, self.pos)[0]
+            self.pos += 4
+            end = self.pos + length
+            if name in ("RuntimeVisibleAnnotations", "RuntimeInvisibleAnnotations"):
+                for _ in range(self.u2()):
+                    kind, values = self.annotation()
+                    found[kind] = values
+            self.pos = end
+        return found
+
+    def annotation(self):
+        kind = self.utf8(self.u2())
+        values = {}
+        for _ in range(self.u2()):
+            key = self.utf8(self.u2())
+            values[key] = self.element()
+        return kind, values
+
+    def element(self):
+        tag = chr(self.u1())
+        if tag == "s":
+            return self.utf8(self.u2())
+        if tag in "BCDFIJSZ":
+            self.u2()
+            return None
+        if tag == "e":
+            self.u2()
+            return self.utf8(self.u2())
+        if tag == "c":
+            return self.utf8(self.u2())
+        if tag == "@":
+            return self.annotation()
+        if tag == "[":
+            return [self.element() for _ in range(self.u2())]
+        raise ValueError(f"unknown annotation element {tag}")
+
+    def references(self):
+        for entry in self.pool:
+            if entry and entry[0] in (9, 10, 11):
+                owner = self.class_name(entry[1])
+                name_and_type = self.pool[entry[2]]
+                yield ("field" if entry[0] == 9 else "method", owner, self.utf8(name_and_type[1]), self.utf8(name_and_type[2]))
+
+    def class_references(self):
+        for entry in self.pool:
+            if entry and entry[0] == "utf8":
+                yield from re.findall(r"net/minecraft/[A-Za-z0-9_/$]+", entry[1])
+
+
+class Intermediary:
+    kind = "intermediary"
+
+    def __init__(self, version):
+        jar = fetch_published_sha1(INTERMEDIARY.format(version), CACHE / "intermediary" / f"{version}.jar")
+        text = zipfile.ZipFile(jar).read("mappings/mappings.tiny").decode()
+        rows = [line.split("\t") for line in text.splitlines()[1:]]
+        names = {row[1]: row[2] for row in rows if row[0] == "c"}
+        self.members = {}
+        self.anywhere = {"field": {}, "method": {}}
+        owner = None
+        for row in rows:
+            if row[0] == "c":
+                owner = self.members.setdefault(row[2], {"field": {}, "method": {}})
+            elif len(row) >= 5 and row[0] == "" and row[1] in ("m", "f"):
+                desc = re.sub(r"L([^;]+);", lambda match: "L" + names.get(match.group(1), match.group(1)) + ";", row[2])
+                kind = "method" if row[1] == "m" else "field"
+                owner[kind].setdefault(row[4], set()).add(desc)
+                self.anywhere[kind].setdefault(row[4], set()).add(desc)
+
+    def has_class(self, name):
+        return name in self.members
+
+    def has(self, kind, owner, name, desc):
+        # Constructors are not in the mappings, so only their owner class is checked here.
+        if name in SPECIAL_METHODS:
+            return owner in self.members
+        if not INTERMEDIARY_MEMBER.match(name):
+            return False
+        if owner not in self.members:
+            return False
+        # Mappings list a member only on the class that declares it, and intermediary names are unique across the
+        # game, so an inherited member is looked up by name alone.
+        found = self.anywhere[kind].get(name)
+        return bool(found) and (desc is None or desc in found)
+
+    def descriptors(self, owner, name):
+        return self.anywhere["method"].get(name, set())
+
+    def abstract_methods(self, owner):
+        return {(name, desc) for name, descs in self.members.get(owner, {}).get("method", {}).items() for desc in descs}
+
+
+class ClientJar:
+    kind = "client"
+
+    def __init__(self, version, manifest):
+        entry = next(item for item in manifest["versions"] if item["id"] == version)
+        meta = json.loads(fetch(entry["url"], CACHE / "versions" / f"{version}.json", entry.get("sha1")).read_bytes())
+        client = meta["downloads"]["client"]
+        jar = fetch(client["url"], CACHE / "clients" / f"{version}.jar", client["sha1"])
+        self.zip = zipfile.ZipFile(jar)
+        self.classes = {}
+
+    def load(self, name):
+        if name not in self.classes:
+            try:
+                self.classes[name] = ClassFile(self.zip.read(name + ".class"))
+            except KeyError:
+                self.classes[name] = None
+        return self.classes[name]
+
+    def has_class(self, name):
+        return self.load(name) is not None
+
+    def has(self, kind, owner, name, desc):
+        seen = set()
+        pending = [owner]
+        while pending:
+            current = pending.pop()
+            if current in seen:
+                continue
+            seen.add(current)
+            # Members inherited from Object or a library are not checked: the jar of the game has no such classes.
+            cls = self.load(current) if current.startswith("net/minecraft/") else None
+            if cls is None:
+                continue
+            members = cls.fields if kind == "field" else cls.methods
+            if any(m["name"] == name and (desc is None or m["desc"] == desc) for m in members):
+                return True
+            if name == "<init>":
+                return False
+            pending.extend([cls.super] if cls.super else [])
+            pending.extend(cls.interfaces)
+        return False
+
+    def descriptors(self, owner, name):
+        cls = self.load(owner)
+        return {m["desc"] for m in cls.methods if m["name"] == name} if cls else set()
+
+    def constructors(self, owner):
+        return len(self.descriptors(owner, "<init>"))
+
+    def abstract_methods(self, owner):
+        cls = self.load(owner)
+        return {(m["name"], m["desc"]) for m in cls.methods if m["access"] & 0x0400} if cls else set()
+
+
+def argument_types(desc):
+    return re.findall(r"\[*(?:L[^;]+;|[BCDFIJSZ])", desc[1:desc.index(")")])
+
+
+class ModJar:
+    def __init__(self, path):
+        archive = zipfile.ZipFile(path)
+        config = json.loads(archive.read("mcmonitor.mixins.json"))
+        package = config["package"].replace(".", "/")
+        self.mixins = {name: f"{package}/{name}" for name in config.get("client", []) + config.get("mixins", [])}
+        self.classes = [ClassFile(archive.read(name)) for name in archive.namelist() if name.endswith(".class")]
+
+
+def check_class(mod_class, universe, mixin_name, problems):
+    def problem(text):
+        problems.append(f"{mod_class.name.rsplit('/', 1)[-1]}: {text}")
+
+    for name in set(mod_class.class_references()):
+        if not universe.has_class(name):
+            problem(f"class {name} is missing")
+    for kind, owner, name, desc in mod_class.references():
+        if owner.startswith("net/minecraft/") and not universe.has(kind, owner, name, desc):
+            problem(f"{kind} {owner}.{name}{desc} is missing")
+    for interface in mod_class.interfaces:
+        if interface.startswith("net/minecraft/"):
+            implemented = {(m["name"], m["desc"]) for m in mod_class.methods}
+            for method in universe.abstract_methods(interface) - implemented:
+                problem(f"does not implement {interface}.{method[0]}{method[1]}")
+    if mixin_name is None:
+        return
+    target = mod_class.annotations.get(f"L{MIXIN}Mixin;", {}).get("value", [None])[0]
+    if target is None:
+        problem("has no @Mixin target")
+        return
+    target = target[1:-1]
+    if not universe.has_class(target):
+        problem(f"mixin target {target} is missing")
+        return
+    for field in mod_class.fields:
+        if f"L{MIXIN}Shadow;" in field["annotations"] and not universe.has("field", target, field["name"], field["desc"]):
+            problem(f"@Shadow field {field['name']} is missing in {target}")
+    for method in mod_class.methods:
+        annotations = method["annotations"]
+        accessor = annotations.get(f"L{MIXIN}gen/Accessor;")
+        if accessor:
+            desc = method["desc"][method["desc"].index(")") + 1:]
+            if not universe.has("field", target, accessor["value"], desc):
+                problem(f"@Accessor field {accessor['value']} is missing in {target}")
+        for injector in ("Inject", "ModifyVariable"):
+            values = annotations.get(f"L{MIXIN}injection/{injector};")
+            if not values:
+                continue
+            for selector in values.get("method", []):
+                check_selector(selector, method, injector, target, universe, problem)
+            points = values.get("at")
+            for point in points if isinstance(points, list) else [points]:
+                invoke = point and point[1].get("target")
+                if invoke:
+                    owner, rest = invoke[1:].split(";", 1)
+                    name, desc = rest[:rest.index("(")], rest[rest.index("("):]
+                    if not universe.has("method", owner, name, desc):
+                        problem(f"@At target {invoke} is missing")
+
+
+def check_selector(selector, handler, injector, target, universe, problem):
+    if "(" in selector:
+        name, desc = selector[:selector.index("(")], selector[selector.index("("):]
+    else:
+        name, desc = selector, None
+    if name == "<init>":
+        if universe.kind != "client":
+            return
+        if desc is None and universe.constructors(target) != 1:
+            problem(f"constructor selector without descriptor matches {universe.constructors(target)} in {target}")
+        elif desc is not None and not universe.has("method", target, name, desc):
+            problem(f"constructor {target}{desc} is missing")
+        return
+    if not universe.has("method", target, name, desc):
+        problem(f"@{injector} target {target}.{selector} is missing")
+        return
+    if injector == "ModifyVariable":
+        wanted = handler["desc"][handler["desc"].index(")") + 1:]
+        for found in universe.descriptors(target, name):
+            if argument_types(found).count(wanted) != 1:
+                problem(f"@ModifyVariable {target}.{name}{found} has no single argument {wanted}")
+
+
+def check_made_up_members(universe, version):
+    owner, method, field = MADE_UP[universe.kind]
+    if not universe.has_class(owner):
+        raise SystemExit(f"mixin-targets: self-check class {owner} is missing on {version}")
+    if universe.has("method", owner, method, "()V") or universe.has("field", owner, field, "I"):
+        raise SystemExit(f"mixin-targets: self-check failed on {version}: a made-up member of {owner} was found")
+
+
+def stable_versions():
+    return [item["version"] for item in fetch_json(GAME_VERSIONS, "game-versions.json") if item["stable"]]
+
+
+def mod_jar(line, version):
+    jar = ROOT / "client-fabric" / line / "build" / "libs" / f"mcmonitor-client-fabric-{line}-{version}.jar"
+    if not jar.exists():
+        raise SystemExit(f"mixin-targets: no {jar.name}, build it first")
+    return jar
+
+
+def main():
+    project = project_version()
+    versions = stable_versions()
+    manifest = None
+    failed = False
+    for line, rules in LINES.items():
+        mod = ModJar(mod_jar(line, project))
+        own = {name: simple for simple, name in mod.mixins.items()}
+        line_versions = sorted((v for v in versions if in_range(v, rules["from"], rules["to"])), key=version_key)
+        for version in line_versions:
+            if version_key(version) >= (26,):
+                manifest = manifest or fetch_json(MOJANG_MANIFEST, "mojang-manifest.json")
+                universe = ClientJar(version, manifest)
+            else:
+                universe = Intermediary(version)
+            check_made_up_members(universe, version)
+            problems = []
+            for mod_class in mod.classes:
+                simple = own.get(mod_class.name)
+                limits = rules["only"].get(simple)
+                if limits and not in_range(version, *limits):
+                    continue
+                check_class(mod_class, universe, simple, problems)
+            for text in problems:
+                print(f"mixin-targets: {line} on {version}: {text}", file=sys.stderr)
+            failed = failed or bool(problems)
+        print(f"mixin-targets: {line}: {len(line_versions)} versions {line_versions[0]}..{line_versions[-1]} checked")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

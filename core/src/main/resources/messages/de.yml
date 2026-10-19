@@ -1,0 +1,8 @@
+# Nachrichten an Spieler. {reason} und {until} setzt das Plugin ein.
+# Die Datei darf bearbeitet werden, Änderungen gelten nach einem Serverneustart. Für gelöschte Zeilen gilt der eingebaute Text.
+date-format: "d. MMMM yyyy 'um' HH:mm 'Uhr' z"
+banned: "Du wurdest auf diesem Server gesperrt.\nGrund: {reason}"
+banned-until: "Du wurdest auf diesem Server gesperrt.\nGrund: {reason}\nDeine Sperre wird am {until} aufgehoben"
+banned-no-reason: "Du wurdest auf diesem Server gesperrt."
+banned-until-no-reason: "Du wurdest auf diesem Server gesperrt.\nDeine Sperre wird am {until} aufgehoben"
+launcher-required: "Du kannst diesem Server nur über den MC-Monitor-Launcher beitreten.\nStarte das Spiel über den Launcher und tritt erneut bei."

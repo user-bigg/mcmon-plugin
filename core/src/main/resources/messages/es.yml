@@ -1,0 +1,8 @@
+# Mensajes para los jugadores. El plugin rellena {reason} y {until}.
+# Puedes editar este archivo; los cambios se aplican al reiniciar el servidor. Si borras una línea, se usa el texto integrado.
+date-format: "d 'de' MMMM 'de' yyyy, HH:mm z"
+banned: "Te han bloqueado en este servidor.\nMotivo: {reason}"
+banned-until: "Te han bloqueado en este servidor.\nMotivo: {reason}\nFecha de desbloqueo: {until}"
+banned-no-reason: "Te han bloqueado en este servidor."
+banned-until-no-reason: "Te han bloqueado en este servidor.\nFecha de desbloqueo: {until}"
+launcher-required: "A este servidor solo se puede entrar con el launcher de MC Monitor.\nAbre el juego desde el launcher y vuelve a entrar."

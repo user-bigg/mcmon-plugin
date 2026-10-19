@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+step() {
+    printf '\n== %s ==\n' "$1"
+    shift
+    "$@"
+}
+
+platform=yes
+for arg in "$@"; do
+    case "$arg" in
+        --no-docker) platform=no ;;
+        *) echo "usage: scripts/check [--no-docker]" >&2; exit 2 ;;
+    esac
+done
+
+step "format" ./gradlew -q spotlessCheck
+step "compile, unit tests, jars" ./gradlew -q build
+step "client mod targets in every game version" scripts/mixin-targets
+# Release scripts are not shipped to the public repository, so this step runs only where they exist.
+if [[ -x scripts/publish-test ]]; then
+    step "public repository mirror" scripts/publish-test
+fi
+
+if [[ "$platform" == yes ]]; then
+    if docker info >/dev/null 2>&1; then
+        step "platform tests in Docker" ./gradlew -q :platform-tests:test -Pplatform
+    else
+        echo "Docker is not running: start it or pass --no-docker" >&2
+        exit 1
+    fi
+    printf '\ncheck: all green\n'
+else
+    printf '\ncheck: green without platform tests (--no-docker)\n'
+fi

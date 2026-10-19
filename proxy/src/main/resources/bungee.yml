@@ -1,0 +1,5 @@
+name: MCMonitor
+version: "${version}"
+main: ru.mcmon.plugin.bungee.MCMonitorBungeePlugin
+author: MC Monitor
+description: Confirms players who join through the MC Monitor launcher and keeps out players banned in the server dashboard.

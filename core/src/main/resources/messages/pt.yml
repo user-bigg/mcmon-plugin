@@ -1,0 +1,8 @@
+# Mensagens para os jogadores. O plugin preenche {reason} e {until}.
+# Você pode editar este arquivo; as mudanças valem após reiniciar o servidor. Se você apagar uma linha, será usado o texto padrão.
+date-format: "d 'de' MMMM 'de' yyyy, HH:mm z"
+banned: "Você foi banido(a) deste servidor.\nMotivo: {reason}"
+banned-until: "Você foi banido(a) deste servidor.\nMotivo: {reason}\nBanimento válido até: {until}"
+banned-no-reason: "Você foi banido(a) deste servidor."
+banned-until-no-reason: "Você foi banido(a) deste servidor.\nBanimento válido até: {until}"
+launcher-required: "Você só pode entrar neste servidor pelo launcher do MC Monitor.\nAbra o jogo pelo launcher e entre de novo."

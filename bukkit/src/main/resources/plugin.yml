@@ -1,0 +1,8 @@
+name: MCMonitor
+version: "${version}"
+main: ru.mcmon.plugin.bukkit.MCMonitorBukkitPlugin
+api-version: "1.18"
+folia-supported: true
+author: MC Monitor
+website: https://mc-mon.ru
+description: Confirms players who join through the MC Monitor launcher and keeps out players banned in the server dashboard.

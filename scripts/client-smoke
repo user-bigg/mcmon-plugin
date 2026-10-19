@@ -1,0 +1,443 @@
+#!/usr/bin/env python3
+"""Starts a real Fabric client with the mod in a linux/amd64 container under Xvfb and connects it to a stub server
+that asks for the launch code. Manual check, not part of scripts/check: the first run downloads the game.
+
+    scripts/client-smoke [minecraft version] [fabric loader version]     default: 1.21.11 0.15.0
+    MCMONITOR_SMOKE_JAR=<jar> scripts/client-smoke ...                  try another mod jar
+
+Three logins: the play file names this server (the code must arrive), another server (no code), no play file
+(no code). On 26.x one more: the server does not ask, then a second connection that skips the connect screen
+asks (no address, no code); a helper mod opens it by reflection. After that the client logs are searched for the code.
+"""
+
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import urllib.request
+import zipfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+CACHE = Path(os.environ.get("MCMONITOR_CACHE", Path.home() / ".cache" / "mcmonitor")) / "client-smoke"
+MOJANG_MANIFEST = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
+FABRIC_PROFILE = "https://meta.fabricmc.net/v2/versions/loader/{0}/{1}/profile/json"
+IMAGE = "mcmonitor-client-smoke:1"
+NICK = "Smoke_Tester"
+CODE = "SmokeCode0123456789abcdefghijklm"
+
+DOCKERFILE = """FROM --platform=linux/amd64 eclipse-temurin:{java}-jre
+RUN apt-get update && apt-get install -y --no-install-recommends python3 xvfb xauth libgl1 libgl1-mesa-dri \\
+    libx11-6 libxext6 libxrandr2 libxcursor1 libxi6 libxinerama1 libxxf86vm1 libxtst6 libxrender1 && \\
+    rm -rf /var/lib/apt/lists/*
+"""
+
+SERVER = r'''
+import json, socket, sys
+
+def varint(value):
+    out = bytearray()
+    while True:
+        byte = value & 0x7F
+        value >>= 7
+        out.append(byte | (0x80 if value else 0))
+        if not value:
+            return bytes(out)
+
+def read_varint(read):
+    value = shift = 0
+    while True:
+        byte = read(1)[0]
+        value |= (byte & 0x7F) << shift
+        shift += 7
+        if not byte & 0x80:
+            return value
+
+def packet(conn):
+    def read(n):
+        data = b""
+        while len(data) < n:
+            chunk = conn.recv(n - len(data))
+            if not chunk:
+                raise EOFError
+            data += chunk
+        return data
+    body = read(read_varint(read))
+    pos = [0]
+    def take(n):
+        pos[0] += n
+        return body[pos[0] - n:pos[0]]
+    return read_varint(take), take, body
+
+def send(conn, packet_id, payload):
+    data = varint(packet_id) + payload
+    conn.sendall(varint(len(data)) + data)
+
+def string(text):
+    raw = text.encode()
+    return varint(len(raw)) + raw
+
+def query(conn, message_id, channel):
+    send(conn, 0x04, varint(message_id) + string(channel))
+    while True:
+        packet_id, take, body = packet(conn)
+        if packet_id == 0x02:
+            assert read_varint(take) == message_id
+            has_data = take(1)[0] == 1
+            return body[len(varint(0x02)) + len(varint(message_id)) + 1:] if has_data else None
+
+server = socket.socket()
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind(("0.0.0.0", 25565))
+server.listen(1)
+conn, _ = server.accept()
+packet_id, take, _ = packet(conn)
+assert packet_id == 0x00
+packet(conn)
+asks = sys.argv[1] == "asks"
+ours = query(conn, 7, "mcmonitor:play") if asks else None
+other = query(conn, 8, "example:other") if asks else None
+send(conn, 0x00, string(json.dumps({"text": "smoke test done"})))
+conn.close()
+result = {"asked": asks,
+          "ours": ours.decode("ascii", "replace") if ours is not None else None,
+          "other": other.decode("ascii", "replace") if other is not None else None}
+print(json.dumps(result), flush=True)
+'''
+
+# First-run screens would stop the client before it connects; the rest only saves time under emulation.
+OPTIONS = """onboardAccessibility:false
+skipMultiplayerWarning:true
+tutorialStep:none
+narrator:0
+renderDistance:2
+simulationDistance:5
+maxFps:10
+graphicsMode:0
+menuBackgroundBlurriness:0
+soundDevice:""
+"""
+
+RUN = r'''#!/bin/sh
+set -e
+cd /work
+python3 /work/server.py {server_mode} > /work/result.json &
+server=$!
+xvfb-run -a -s "-screen 0 854x480x24" java -Xmx1G -Djava.library.path=/cache/natives/{version} -cp "$(cat /work/classpath)" {main} \
+    --username {nick} --uuid 00000000000000000000000000000001 --accessToken 0 --version {version} \
+    --gameDir /work/game --assetsDir /work/assets --assetIndex {asset_index} {connect} \
+    > /work/client.out 2>&1 &
+client=$!
+for i in $(seq 1 300); do
+    if ! kill -0 $server 2>/dev/null; then break; fi
+    if ! kill -0 $client 2>/dev/null; then break; fi
+    sleep 1
+done
+if [ -f /work/game/mods/mcmonitor-smoke-second-connection.jar ]; then
+    sleep 2
+    touch /work/second
+    for i in $(seq 1 60); do
+        if [ -f /work/second.done ]; then break; fi
+        sleep 1
+    done
+    sleep 2
+fi
+kill $client 2>/dev/null || true
+kill $server 2>/dev/null || true
+wait $client 2>/dev/null || true
+'''
+
+
+# Opens a second login connection without the connect screen, as a mod or a game path the mod does not hook
+# would, and hands it a mcmonitor:play query. Unobfuscated 26.x only: the names are looked up by reflection.
+SECOND_CONNECTION = r'''
+package smoke;
+
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Proxy;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.Duration;
+import java.util.function.Consumer;
+import net.fabricmc.api.ClientModInitializer;
+
+public final class SecondConnection implements ClientModInitializer {
+    private static final Path START = Paths.get("/work/second");
+    private static final Path DONE = Paths.get("/work/second.done");
+
+    @Override
+    public void onInitializeClient() {
+        Thread thread = new Thread(SecondConnection::waitAndConnect, "smoke-second-connection");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private static void waitAndConnect() {
+        try {
+            while (!Files.exists(START)) {
+                Thread.sleep(200);
+            }
+            Object minecraft = Class.forName("net.minecraft.client.Minecraft").getMethod("getInstance").invoke(null);
+            Runnable connect = () -> {
+                String outcome;
+                try {
+                    connect(minecraft);
+                    outcome = "ok";
+                } catch (Throwable e) {
+                    outcome = e.toString();
+                }
+                try {
+                    Files.write(DONE, outcome.getBytes());
+                } catch (Exception ignored) {
+                }
+            };
+            minecraft.getClass().getMethod("execute", Runnable.class).invoke(minecraft, connect);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static void connect(Object minecraft) throws Exception {
+        Class<?> flow = Class.forName("net.minecraft.network.protocol.PacketFlow");
+        Class<?> connectionClass = Class.forName("net.minecraft.network.Connection");
+        Object connection = connectionClass.getConstructor(flow).newInstance(Enum.valueOf((Class) flow, "CLIENTBOUND"));
+        Class<?> listenerClass = Class.forName("net.minecraft.client.multiplayer.ClientHandshakePacketListenerImpl");
+        Constructor<?> constructor = listenerClass.getConstructors()[0];
+        Class<?>[] types = constructor.getParameterTypes();
+        Object[] arguments = new Object[types.length];
+        for (int i = 0; i < types.length; i++) {
+            if (types[i] == connectionClass) {
+                arguments[i] = connection;
+            } else if (types[i].isInstance(minecraft)) {
+                arguments[i] = minecraft;
+            } else if (types[i] == boolean.class) {
+                arguments[i] = false;
+            } else if (types[i] == Duration.class) {
+                arguments[i] = Duration.ZERO;
+            } else if (types[i] == Consumer.class) {
+                arguments[i] = (Consumer<Object>) status -> {};
+            }
+        }
+        Object listener = constructor.newInstance(arguments);
+        Class<?> payloadClass = Class.forName("net.minecraft.network.protocol.login.custom.CustomQueryPayload");
+        Object channel = Class.forName("net.minecraft.resources.Identifier")
+                .getMethod("fromNamespaceAndPath", String.class, String.class)
+                .invoke(null, "mcmonitor", "play");
+        Object payload = Proxy.newProxyInstance(payloadClass.getClassLoader(), new Class<?>[] {payloadClass},
+                (proxy, method, args) -> method.getName().equals("id") ? channel : null);
+        Class<?> packetClass = Class.forName("net.minecraft.network.protocol.login.ClientboundCustomQueryPacket");
+        Object packet = packetClass.getConstructor(int.class, payloadClass).newInstance(9, payload);
+        listenerClass.getMethod("handleCustomQuery", packetClass).invoke(listener, packet);
+    }
+}
+'''
+
+SECOND_CONNECTION_MOD = {"schemaVersion": 1, "id": "mcmonitor_smoke_second", "version": "1", "environment": "client",
+                         "entrypoints": {"client": ["smoke.SecondConnection"]}}
+
+
+def second_connection_mod(profile):
+    loader = next(CACHE / "libraries" / maven_path(library["name"]) for library in profile["libraries"]
+                  if library["name"].startswith("net.fabricmc:fabric-loader:"))
+    build = ROOT / "build" / "client-smoke" / "second-connection"
+    if build.exists():
+        shutil.rmtree(build)
+    (build / "src" / "smoke").mkdir(parents=True)
+    (build / "src" / "smoke" / "SecondConnection.java").write_text(SECOND_CONNECTION)
+    javac = shutil.which("javac")
+    if javac is None:
+        raise SystemExit("client-smoke: javac (JDK 17+) is needed for the second connection helper")
+    subprocess.run([javac, "-nowarn", "--release", "17", "-cp", str(loader), "-d", str(build / "classes"),
+                    str(build / "src" / "smoke" / "SecondConnection.java")], check=True)
+    jar = build / "mcmonitor-smoke-second-connection.jar"
+    with zipfile.ZipFile(jar, "w") as archive:
+        archive.writestr("fabric.mod.json", json.dumps(SECOND_CONNECTION_MOD))
+        for path in (build / "classes").rglob("*.class"):
+            archive.write(path, str(path.relative_to(build / "classes")))
+    return jar
+
+
+def fetch(url, target, sha1=None):
+    if not target.exists():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with urllib.request.urlopen(url, timeout=120) as response:
+            data = response.read()
+        if sha1 and hashlib.sha1(data).hexdigest() != sha1:
+            raise SystemExit(f"client-smoke: {url} failed its sha1 check")
+        partial = target.with_suffix(target.suffix + ".part")
+        partial.write_bytes(data)
+        partial.replace(target)
+    return target
+
+
+def allowed(rules):
+    verdict = not rules
+    for rule in rules or []:
+        os_name = rule.get("os", {}).get("name")
+        if "features" in rule:
+            continue
+        if os_name in (None, "linux"):
+            verdict = rule["action"] == "allow"
+    return verdict
+
+
+def maven_path(name):
+    group, artifact, version = name.split(":")[:3]
+    classifier = name.split(":")[3] if name.count(":") > 2 else None
+    file = f"{artifact}-{version}" + (f"-{classifier}" if classifier else "") + ".jar"
+    return f"{group.replace('.', '/')}/{artifact}/{version}/{file}"
+
+
+def prepare(version, loader):
+    manifest = json.loads(fetch(MOJANG_MANIFEST, CACHE / "manifest.json").read_bytes())
+    entry = next(item for item in manifest["versions"] if item["id"] == version)
+    meta = json.loads(fetch(entry["url"], CACHE / "versions" / f"{version}.json").read_bytes())
+    profile = json.loads(fetch(FABRIC_PROFILE.format(version, loader), CACHE / "fabric" / f"{version}-{loader}.json").read_bytes())
+    jars = []
+    natives = []
+    for library in meta["libraries"]:
+        if not allowed(library.get("rules")):
+            continue
+        artifact = library.get("downloads", {}).get("artifact")
+        if artifact:
+            jars.append(fetch(artifact["url"], CACHE / "libraries" / artifact["path"], artifact["sha1"]))
+        classifier = library.get("natives", {}).get("linux")
+        if classifier:
+            native = library["downloads"]["classifiers"][classifier.replace("${arch}", "64")]
+            natives.append(fetch(native["url"], CACHE / "libraries" / native["path"], native["sha1"]))
+    for library in profile["libraries"]:
+        path = maven_path(library["name"])
+        jars.append(fetch(library.get("url", "https://maven.fabricmc.net/") + path, CACHE / "libraries" / path, library.get("sha1")))
+    client = meta["downloads"]["client"]
+    jars.append(fetch(client["url"], CACHE / "versions" / f"{version}-client.jar", client["sha1"]))
+    index = meta["assetIndex"]
+    objects = json.loads(fetch(index["url"], CACHE / "assets" / "indexes" / f"{index['id']}.json", index["sha1"]).read_bytes())
+    for name, item in objects["objects"].items():
+        if needed_asset(name):
+            path = f"{item['hash'][:2]}/{item['hash']}"
+            fetch(f"https://resources.download.minecraft.net/{path}", CACHE / "assets" / "objects" / path, item["hash"])
+    native_dir = CACHE / "natives" / version
+    if not native_dir.exists():
+        for jar in natives:
+            with zipfile.ZipFile(jar) as archive:
+                for name in archive.namelist():
+                    if name.endswith(".so") and "/" not in name:
+                        native_dir.mkdir(parents=True, exist_ok=True)
+                        (native_dir / name).write_bytes(archive.read(name))
+    return meta, profile, jars
+
+
+def needed_asset(name):
+    if name.startswith("minecraft/sounds/") or name == "minecraft/sounds.json":
+        return False
+    return not name.startswith("minecraft/lang/") or name == "minecraft/lang/en_us.json"
+
+
+def run_login(version, meta, profile, jars, play, label, server_asks=True, extra_mod=None):
+    work = ROOT / "build" / "client-smoke" / version / label
+    if work.exists():
+        shutil.rmtree(work)
+    (work / "game" / "mods").mkdir(parents=True)
+    (work / "game" / "options.txt").write_text(OPTIONS)
+    jar = Path(os.environ["MCMONITOR_SMOKE_JAR"]) if "MCMONITOR_SMOKE_JAR" in os.environ else mod_jar(version)
+    shutil.copy(jar, work / "game" / "mods" / jar.name)
+    if extra_mod is not None:
+        shutil.copy(extra_mod, work / "game" / "mods" / extra_mod.name)
+    if play is not None:
+        (work / "game" / "mcmonitor").mkdir()
+        (work / "game" / "mcmonitor" / "play.json").write_text(json.dumps(play))
+    (work / "server.py").write_text(SERVER)
+    (work / "classpath").write_text(":".join("/cache/" + str(path.relative_to(CACHE)) for path in jars))
+    connect = "--quickPlayMultiplayer localhost:25565" if version_key(version) >= (1, 20) else "--server localhost --port 25565"
+    (work / "run.sh").write_text(RUN.format(main=profile["mainClass"], nick=NICK, version=version,
+                                            server_mode="asks" if server_asks else "silent",
+                                            asset_index=meta["assetIndex"]["id"], connect=connect))
+    (work / "assets").symlink_to("/cache/assets")
+    java = meta.get("javaVersion", {}).get("majorVersion", 8)
+    image = f"{IMAGE}-java{java}"
+    if subprocess.run(["docker", "image", "inspect", image], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode:
+        subprocess.run(["docker", "build", "-q", "--platform", "linux/amd64", "-t", image, "-"],
+                       input=DOCKERFILE.format(java=java).encode(), check=True, stdout=subprocess.DEVNULL)
+    # Offline the game takes its no-account path; online with a fake token 1.16.5 never opened the connect screen.
+    subprocess.run(["docker", "run", "--rm", "--network", "none", "--platform", "linux/amd64", "-v", f"{work}:/work",
+                    "-v", f"{CACHE}:/cache:ro", image, "sh", "/work/run.sh"], check=True)
+    result_text = (work / "result.json").read_text().strip()
+    result = json.loads(result_text) if result_text else None
+    logs = "".join(path.read_text(errors="replace") for path in [work / "client.out", *sorted((work / "game" / "logs").glob("*.log"))] if path.exists())
+    return result, logs, work
+
+
+def mod_jar(version):
+    line = "mc26.1" if version_key(version) >= (26,) else "mc1.20.2" if version_key(version) >= (1, 20, 2) else "mc1.14"
+    jar = ROOT / "client-fabric" / line / "build" / "libs" / f"mcmonitor-client-fabric-{line}-{project_version()}.jar"
+    if not jar.exists():
+        raise SystemExit(f"client-smoke: build {jar.name} first (./gradlew build)")
+    return jar
+
+
+def project_version():
+    match = re.search(r'^\s*version\s*=\s*"([^"]+)"', (ROOT / "build.gradle.kts").read_text(), re.MULTILINE)
+    if not match:
+        raise SystemExit("client-smoke: no project version in build.gradle.kts")
+    return match.group(1)
+
+
+def version_key(version):
+    return tuple(int(part) for part in version.split("."))
+
+
+def main():
+    version = sys.argv[1] if len(sys.argv) > 1 else "1.21.11"
+    loader = sys.argv[2] if len(sys.argv) > 2 else "0.15.0"
+    meta, profile, jars = prepare(version, loader)
+    ticket = {"v": 1, "server_id": 1, "nick": NICK, "code": CODE, "host": "LOCALHOST", "port": None}
+    cases = [
+        ("this-server", ticket, CODE),
+        ("other-server", dict(ticket, host="play.example.org"), None),
+        ("no-file", None, None),
+    ]
+    if version_key(version) >= (26,):
+        cases.append(("no-query-then-second-connection", ticket, None))
+    failed = False
+    for label, play, expected in cases:
+        second = label == "no-query-then-second-connection"
+        extra = second_connection_mod(profile) if second else None
+        result, logs, work = run_login(version, meta, profile, jars, play, label, server_asks=not second, extra_mod=extra)
+        mixins_ok = "The server asked for the launch code" in logs
+        verdicts = []
+        if result is None:
+            verdicts.append("the client never answered the stub server")
+        elif second:
+            done = (work / "second.done").read_text() if (work / "second.done").exists() else "never opened"
+            if done != "ok":
+                verdicts.append(f"second connection: {done}")
+            if "The server asked for the launch code: sent" in logs:
+                verdicts.append("the second connection got the code")
+            if "not sent (the server address is unknown)" not in logs:
+                verdicts.append("no log line that the second connection had no address")
+        else:
+            expected_ours = "\x01" + expected if expected else None
+            if result["ours"] != expected_ours:
+                verdicts.append(f"mcmonitor:play answer was {'a code' if result['ours'] else 'empty'}")
+            if result["other"] is not None:
+                verdicts.append("another channel got data")
+        if not mixins_ok:
+            verdicts.append("no mod log line about the request")
+        if CODE in logs:
+            verdicts.append("the code is in the client log")
+        for line in logs.splitlines():
+            if "mcmonitor" in line.lower() and ("mixin" in line.lower() or "error" in line.lower()):
+                print(f"client-smoke:   {line.strip()}")
+        status = "ok" if not verdicts else "FAILED: " + "; ".join(verdicts)
+        print(f"client-smoke: {version} with Fabric Loader {loader}, {label}: {status} (logs in {work})")
+        failed = failed or bool(verdicts)
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

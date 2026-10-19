@@ -1,0 +1,16 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "ru.mcmon.plugin.client.fabric.mixin",
+  "plugin": "ru.mcmon.plugin.client.fabric.mixin.ConnectScreenMixins",
+  "compatibilityLevel": "JAVA_8",
+  "client": [
+    "ClientHandshakePacketListenerImplMixin",
+    "ConnectScreenLegacyMixin",
+    "ConnectScreenMixin",
+    "CustomQueryPacketAccessor"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "mcmonitor",
+  "version": "${version}",
+  "name": "MC Monitor",
+  "description": "Hands the launch code from the MC Monitor launcher to the server it was issued for, and to no other server.",
+  "license": "GPL-3.0-only",
+  "environment": "client",
+  "mixins": ["mcmonitor.mixins.json"],
+  "depends": {
+    "fabricloader": ">=0.18.4",
+    "minecraft": ">=26.1"
+  }
+}

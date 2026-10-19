@@ -1,0 +1,8 @@
+# Messages shown to players. {reason} and {until} are filled in by the plugin.
+# Edit freely and restart the server. A deleted line falls back to the built-in text.
+date-format: "d MMMM yyyy 'at' HH:mm z"
+banned: "You are banned from this server.\nReason: {reason}"
+banned-until: "You are banned from this server.\nReason: {reason}\nYour ban will be removed on {until}"
+banned-no-reason: "You are banned from this server."
+banned-until-no-reason: "You are banned from this server.\nYour ban will be removed on {until}"
+launcher-required: "You can only join this server through the MC Monitor launcher.\nStart the game from the launcher and join again."

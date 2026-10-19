@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Runs the fake MC Monitor site for manual testing: scripts/fake-site [port] (key: FAKE_SITE_KEY, default dev-key).
+set -euo pipefail
+cd "$(dirname "$0")/.."
+./gradlew -q :fake-site:shadowJar
+exec java -jar fake-site/build/libs/fake-site-all.jar "${1:-8089}"

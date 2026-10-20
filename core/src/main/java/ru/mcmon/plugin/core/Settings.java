@@ -14,18 +14,16 @@ public final class Settings {
     private final URI siteUrl;
     private final Duration timeout;
     private final String language;
-    private final boolean requireLauncher;
 
-    public Settings(String serverKey, URI siteUrl, Duration timeout, String language, boolean requireLauncher) {
+    public Settings(String serverKey, URI siteUrl, Duration timeout, String language) {
         this.serverKey = Objects.requireNonNull(serverKey);
         this.siteUrl = Objects.requireNonNull(siteUrl);
         this.timeout = Objects.requireNonNull(timeout);
         this.language = Objects.requireNonNull(language);
-        this.requireLauncher = requireLauncher;
     }
 
     public static Settings defaults() {
-        return new Settings("", DEFAULT_SITE_URL, DEFAULT_TIMEOUT, DEFAULT_LANGUAGE, false);
+        return new Settings("", DEFAULT_SITE_URL, DEFAULT_TIMEOUT, DEFAULT_LANGUAGE);
     }
 
     public String serverKey() {
@@ -44,10 +42,6 @@ public final class Settings {
         return language;
     }
 
-    public boolean requireLauncher() {
-        return requireLauncher;
-    }
-
     public boolean hasServerKey() {
         return !serverKey.trim().isEmpty();
     }
@@ -57,23 +51,19 @@ public final class Settings {
     }
 
     public Settings withServerKey(String key) {
-        return new Settings(key, siteUrl, timeout, language, requireLauncher);
+        return new Settings(key, siteUrl, timeout, language);
     }
 
     public Settings withSiteUrl(URI url) {
-        return new Settings(serverKey, url, timeout, language, requireLauncher);
+        return new Settings(serverKey, url, timeout, language);
     }
 
     public Settings withTimeout(Duration value) {
-        return new Settings(serverKey, siteUrl, value, language, requireLauncher);
+        return new Settings(serverKey, siteUrl, value, language);
     }
 
     public Settings withLanguage(String value) {
-        return new Settings(serverKey, siteUrl, timeout, value, requireLauncher);
-    }
-
-    public Settings withRequireLauncher(boolean value) {
-        return new Settings(serverKey, siteUrl, timeout, language, value);
+        return new Settings(serverKey, siteUrl, timeout, value);
     }
 
     @Override
@@ -84,19 +74,17 @@ public final class Settings {
         return serverKey.equals(that.serverKey)
                 && siteUrl.equals(that.siteUrl)
                 && timeout.equals(that.timeout)
-                && language.equals(that.language)
-                && requireLauncher == that.requireLauncher;
+                && language.equals(that.language);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(serverKey, siteUrl, timeout, language, requireLauncher);
+        return Objects.hash(serverKey, siteUrl, timeout, language);
     }
 
     @Override
     public String toString() {
         return "Settings[siteUrl=" + siteUrl + ", timeout=" + timeout.toMillis() + "ms, language=" + language
-                + ", requireLauncher=" + requireLauncher
                 + ", serverKey=" + (hasServerKey() ? "set" : "empty") + "]";
     }
 }

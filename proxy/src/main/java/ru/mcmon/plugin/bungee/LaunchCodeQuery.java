@@ -41,7 +41,7 @@ final class LaunchCodeQuery {
 
     private void cannotAsk() {
         if (warned.compareAndSet(false, true)) {
-            log.warn("launch codes cannot be requested on this proxy build; require-launcher has no effect."
+            log.warn("launch codes cannot be requested on this proxy build; launcher-only mode has no effect."
                     + " Players join as if the plugin were not installed; saved bans still apply. Update BungeeCord to a build"
                     + " from September 2024 or newer");
         }

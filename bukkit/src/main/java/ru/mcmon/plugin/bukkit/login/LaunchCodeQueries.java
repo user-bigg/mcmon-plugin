@@ -137,7 +137,7 @@ public final class LaunchCodeQueries {
 
     void cannotWatch() {
         if (degraded.compareAndSet(false, true)) {
-            log.warn("launch codes cannot be requested on this server build; require-launcher has no effect."
+            log.warn("launch codes cannot be requested on this server build; launcher-only mode has no effect."
                     + " Players join as if the plugin were not installed; saved bans still apply. Please report your server"
                     + " version");
         }

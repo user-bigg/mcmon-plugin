@@ -4,8 +4,7 @@ plugins {
     id("mcmonitor.java")
 }
 
-evaluationDependsOn(":bukkit")
-evaluationDependsOn(":proxy")
+evaluationDependsOn(":plugin")
 
 dependencies {
     testImplementation(project(":core"))
@@ -17,23 +16,14 @@ dependencies {
     testRuntimeOnly(libs.junit.launcher)
 }
 
-val bukkitJar = project(":bukkit").tasks.named<Jar>("shadowJar")
-val proxyJar = project(":proxy").tasks.named<Jar>("shadowJar")
+val pluginJar = project(":plugin").tasks.named<Jar>("pluginJar")
 
 tasks.test {
     onlyIf("platform tests run with -Pplatform") { project.hasProperty("platform") }
-    inputs.files(bukkitJar, proxyJar)
+    inputs.files(pluginJar)
     systemProperty(
-        "mcmonitor.bukkitJar",
-        bukkitJar
-            .get()
-            .archiveFile
-            .get()
-            .asFile.absolutePath,
-    )
-    systemProperty(
-        "mcmonitor.proxyJar",
-        proxyJar
+        "mcmonitor.pluginJar",
+        pluginJar
             .get()
             .archiveFile
             .get()

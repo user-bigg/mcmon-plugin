@@ -75,7 +75,7 @@ final class ServerContainer implements AutoCloseable {
         return new ServerContainer(container, 25565, true);
     }
 
-    // Arclight is a Forge or NeoForge server with the Bukkit API on top; the Bukkit jar goes into plugins/.
+    // Arclight is a Forge or NeoForge server with the Bukkit API on top; the plugin jar goes into plugins/.
     // Its first start also runs the Forge installer, which takes longer than the other servers.
     static ServerContainer arclight(String version, String loader, String javaTag, Path pluginJar, String config) {
         GenericContainer<?> container = new GenericContainer<>(

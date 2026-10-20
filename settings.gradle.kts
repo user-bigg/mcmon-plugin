@@ -4,7 +4,7 @@ plugins {
 
 rootProject.name = "mcmonitor"
 
-include("core", "fake-site", "bukkit", "proxy", "platform-tests")
+include("core", "fake-site", "bukkit", "proxy", "plugin", "platform-tests")
 include("client-fabric:common", "client-fabric:mc1.14", "client-fabric:mc1.20.2", "client-fabric:mc26.1")
 
 dependencyResolutionManagement {

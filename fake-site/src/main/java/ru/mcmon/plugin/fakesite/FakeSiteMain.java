@@ -3,6 +3,8 @@ package ru.mcmon.plugin.fakesite;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
@@ -19,10 +21,39 @@ public final class FakeSiteMain {
         String key = System.getenv().getOrDefault("FAKE_SITE_KEY", "dev-key");
         FakeSite site = FakeSite.start(key, port, InetAddress.getByName("0.0.0.0"));
         site.replyWith(FakeSiteMain::reply);
+        String switchFile = System.getenv("FAKE_SITE_LAUNCHER_ONLY_FILE");
+        if (switchFile != null) {
+            followLauncherOnlySwitch(site, Path.of(switchFile));
+        }
         System.out.println("fake MC Monitor site on port " + port + ", server key: " + key);
         System.out.println(
                 "nicks: Guest* -> not confirmed, Banned* -> banned, Slow* -> answer after 5 s, others -> confirmed");
         Thread.currentThread().join();
+    }
+
+    private static void followLauncherOnlySwitch(FakeSite site, Path file) {
+        Thread thread = new Thread(
+                () -> {
+                    boolean on = false;
+                    site.replyToBansWith(Reply.bans("2026-01-01T00:00:00Z", false));
+                    while (!Thread.currentThread().isInterrupted()) {
+                        boolean now = Files.exists(file);
+                        if (now != on) {
+                            on = now;
+                            site.replyToBansWith(Reply.bans(Instant.now().toString(), on));
+                            System.out.println("launcher-only mode " + (on ? "on" : "off"));
+                        }
+                        try {
+                            Thread.sleep(1000);
+                        } catch (InterruptedException e) {
+                            return;
+                        }
+                    }
+                },
+                "launcher-only-switch");
+        thread.setDaemon(true);
+        thread.start();
+        System.out.println("launcher-only mode is on while " + file + " exists");
     }
 
     static Reply reply(RecordedRequest request) {

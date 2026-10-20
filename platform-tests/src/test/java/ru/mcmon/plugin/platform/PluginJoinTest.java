@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.Testcontainers;
 import ru.mcmon.plugin.fakesite.FakeSite;
@@ -32,6 +33,8 @@ class PluginJoinTest {
     private static final String BANNED = "Banned_Bob";
     private static final String CACHED = "Cached_Carl";
     private static final String CACHED_ID = "0123456789abcdef";
+    private static final Reply.BanEntry CACHED_BAN = new Reply.BanEntry(CACHED_ID, "saved reason", null);
+    private static final Reply BANS = Reply.bans("2026-10-13T10:00:00Z", true, CACHED_BAN);
     private static final String BAN_REASON = "grief at spawn";
     private static final String PLAYER_ID = "7f3a91c202be4d10";
     private static final String STRANGER = "Stranger_Sam";
@@ -54,7 +57,6 @@ class PluginJoinTest {
     static void startSite() throws IOException {
         site = FakeSite.start(KEY, 0, InetAddress.getByName("0.0.0.0"));
         Testcontainers.exposeHostPorts(site.port());
-        site.replyToBansWith(Reply.bans("2026-10-13T10:00:00Z", new Reply.BanEntry(CACHED_ID, "saved reason", null)));
         site.replyWith(request -> !CODE.equals(request.code())
                 ? Reply.notConfirmed()
                 : switch (request.nick()) {
@@ -67,6 +69,11 @@ class PluginJoinTest {
                 });
     }
 
+    @BeforeEach
+    void requireLauncherOnTheSite() {
+        site.replyToBansWith(BANS);
+    }
+
     @AfterAll
     static void stopSite() {
         site.close();
@@ -75,7 +82,7 @@ class PluginJoinTest {
     @Test
     void paper26() throws Exception {
         assumeSelected("paper26");
-        try (ServerContainer server = ServerContainer.paper("26.3", "178", "java25", bukkitJar(), config())) {
+        try (ServerContainer server = ServerContainer.paper("26.3", "178", "java25", pluginJar(), config())) {
             exercise(server);
         }
     }
@@ -83,7 +90,7 @@ class PluginJoinTest {
     @Test
     void paper1_21() throws Exception {
         assumeSelected("paper1.21");
-        try (ServerContainer server = ServerContainer.paper("1.21.11", "132", "java21", bukkitJar(), config())) {
+        try (ServerContainer server = ServerContainer.paper("1.21.11", "132", "java21", pluginJar(), config())) {
             exercise(server);
         }
     }
@@ -91,7 +98,7 @@ class PluginJoinTest {
     @Test
     void paper1_18() throws Exception {
         assumeSelected("paper1.18");
-        try (ServerContainer server = ServerContainer.paper("1.18.2", "388", "java17", bukkitJar(), config())) {
+        try (ServerContainer server = ServerContainer.paper("1.18.2", "388", "java17", pluginJar(), config())) {
             exercise(server);
         }
     }
@@ -101,8 +108,9 @@ class PluginJoinTest {
     @Test
     void paper26LateAnswerAndOldGame() throws Exception {
         assumeSelected("paper26-late");
-        try (ServerContainer server = ServerContainer.paper("26.3", "178", "java25", bukkitJar(), config(false))
+        try (ServerContainer server = ServerContainer.paper("26.3", "178", "java25", pluginJar(), config())
                 .withEnv("PLUGINS", VIA_PLUGINS)) {
+            site.replyToBansWith(Reply.bans("2026-10-13T10:00:00Z", false, CACHED_BAN));
             startAndAwaitBans(server);
             int protocol = protocolVersion(server);
 
@@ -133,7 +141,7 @@ class PluginJoinTest {
     @Test
     void paper26BehindProxy() throws Exception {
         assumeSelected("paper26-proxy");
-        try (ServerContainer server = ServerContainer.paper("26.3", "178", "java25", bukkitJar(), config(true))
+        try (ServerContainer server = ServerContainer.paper("26.3", "178", "java25", pluginJar(), config())
                 .withServerFile("spigot.yml", "settings:\n  bungeecord: true\n")) {
             startAndAwaitBans(server);
             int protocol = protocolVersion(server);
@@ -155,7 +163,7 @@ class PluginJoinTest {
     @Test
     void folia1_21() throws Exception {
         assumeSelected("folia");
-        try (ServerContainer server = ServerContainer.folia("1.21.11", "14", "java21", bukkitJar(), config())) {
+        try (ServerContainer server = ServerContainer.folia("1.21.11", "14", "java21", pluginJar(), config())) {
             exercise(server);
             assertTrue(server.logs().contains("running Folia"), server.logs());
             assertFalse(server.logs().contains("UnsupportedOperationException"), server.logs());
@@ -165,7 +173,7 @@ class PluginJoinTest {
     @Test
     void arclight1_21() throws Exception {
         assumeSelected("arclight1.21");
-        try (ServerContainer server = ServerContainer.arclight("1.21.1", "NEOFORGE", "java21", bukkitJar(), config())) {
+        try (ServerContainer server = ServerContainer.arclight("1.21.1", "NEOFORGE", "java21", pluginJar(), config())) {
             exercise(server);
         }
     }
@@ -177,7 +185,7 @@ class PluginJoinTest {
                 "1.20.1",
                 "https://github.com/IzzelAliz/Arclight/releases/download/Trials/1.0.6/arclight-forge-1.20.1-1.0.6.jar",
                 "java17",
-                bukkitJar(),
+                pluginJar(),
                 config())) {
             exercise(server);
         }
@@ -186,7 +194,7 @@ class PluginJoinTest {
     @Test
     void velocity4() throws Exception {
         assumeSelected("velocity4");
-        try (ServerContainer server = ServerContainer.velocity("4.2.0", "30", "java25", proxyJar(), config())) {
+        try (ServerContainer server = ServerContainer.velocity("4.2.0", "30", "java25", pluginJar(), config())) {
             exercise(server);
         }
     }
@@ -194,7 +202,7 @@ class PluginJoinTest {
     @Test
     void velocity3() throws Exception {
         assumeSelected("velocity3");
-        try (ServerContainer server = ServerContainer.velocity("3.5.1", "615", "java21", proxyJar(), config())) {
+        try (ServerContainer server = ServerContainer.velocity("3.5.1", "615", "java21", pluginJar(), config())) {
             exercise(server);
         }
     }
@@ -202,7 +210,7 @@ class PluginJoinTest {
     @Test
     void bungee() throws Exception {
         assumeSelected("bungee");
-        try (ServerContainer server = ServerContainer.bungee("2104", "java17", proxyJar(), config())) {
+        try (ServerContainer server = ServerContainer.bungee("2104", "java17", pluginJar(), config())) {
             exercise(server);
         }
     }
@@ -244,7 +252,7 @@ class PluginJoinTest {
         assertTrue(
                 server.awaitLog(
                         log -> log.contains(GUEST + ": not confirmed (no launch code from the game)"
-                                + " -> kept out, require-launcher is on"),
+                                + " -> kept out, launcher-only mode is on"),
                         Duration.ofSeconds(20)),
                 server.logs());
         assertTrue(guest.reason().contains("MC Monitor launcher"), "guest saw: " + guest);
@@ -253,7 +261,7 @@ class PluginJoinTest {
         JoinResult stranger = join(server, STRANGER, protocol, LaunchCodeReply.code(FOREIGN_CODE));
         assertTrue(
                 server.awaitLog(
-                        log -> log.contains(STRANGER + ": not confirmed -> kept out, require-launcher is on"),
+                        log -> log.contains(STRANGER + ": not confirmed -> kept out, launcher-only mode is on"),
                         Duration.ofSeconds(20)),
                 server.logs());
         assertTrue(stranger.reason().contains("MC Monitor launcher"), "player with a foreign code saw: " + stranger);
@@ -298,7 +306,7 @@ class PluginJoinTest {
             assertTrue(
                     server.awaitLog(
                             log -> log.contains(SILENT + ": not confirmed (no launch code from the game)"
-                                    + " -> kept out, require-launcher is on"),
+                                    + " -> kept out, launcher-only mode is on"),
                             Duration.ofSeconds(20)),
                     server.logs());
             assertTrue(silent.millis() < TIMEOUT_MS + 1000, "silent client waited " + silent.millis() + " ms");
@@ -355,25 +363,16 @@ class PluginJoinTest {
     }
 
     private static String config() {
-        return config(true);
-    }
-
-    private static String config(boolean requireLauncher) {
         return """
                 server-key: "%s"
                 site-url: "http://host.testcontainers.internal:%d"
                 timeout-ms: %d
                 language: en
-                require-launcher: %s
-                """.formatted(KEY, site.port(), TIMEOUT_MS, requireLauncher);
+                """.formatted(KEY, site.port(), TIMEOUT_MS);
     }
 
-    private static Path bukkitJar() {
-        return Path.of(System.getProperty("mcmonitor.bukkitJar"));
-    }
-
-    private static Path proxyJar() {
-        return Path.of(System.getProperty("mcmonitor.proxyJar"));
+    private static Path pluginJar() {
+        return Path.of(System.getProperty("mcmonitor.pluginJar"));
     }
 
     private static void assumeSelected(String name) {

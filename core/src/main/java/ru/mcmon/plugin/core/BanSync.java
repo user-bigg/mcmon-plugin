@@ -90,8 +90,12 @@ public final class BanSync {
                     + current.updatedAt() + "), using the site's list");
         }
         boolean changed = !fetched.bans().equals(current.bans());
+        boolean switched = fetched.requireLauncher() != current.requireLauncher();
         current = fetched;
-        if (changed) {
+        if (switched) {
+            log.info("launcher-only mode turned " + (fetched.requireLauncher() ? "on" : "off") + " by the site");
+        }
+        if (changed || switched) {
             write(fetched);
         }
         if (!connected) {

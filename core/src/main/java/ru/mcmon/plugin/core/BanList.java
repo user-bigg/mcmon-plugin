@@ -15,14 +15,16 @@ import java.util.Optional;
 
 public final class BanList {
 
-    public static final BanList EMPTY = new BanList(Collections.emptyMap(), Instant.EPOCH);
+    public static final BanList EMPTY = new BanList(Collections.emptyMap(), Instant.EPOCH, false);
 
     private final Map<PlayerId, Ban> bans;
     private final Instant updatedAt;
+    private final boolean requireLauncher;
 
-    public BanList(Map<PlayerId, Ban> bans, Instant updatedAt) {
+    public BanList(Map<PlayerId, Ban> bans, Instant updatedAt, boolean requireLauncher) {
         this.bans = Collections.unmodifiableMap(new LinkedHashMap<>(bans));
         this.updatedAt = Objects.requireNonNull(updatedAt);
+        this.requireLauncher = requireLauncher;
     }
 
     public Map<PlayerId, Ban> bans() {
@@ -31,6 +33,10 @@ public final class BanList {
 
     public Instant updatedAt() {
         return updatedAt;
+    }
+
+    public boolean requireLauncher() {
+        return requireLauncher;
     }
 
     public Optional<Ban> find(PlayerId id) {
@@ -57,7 +63,10 @@ public final class BanList {
             if (bans == null || !bans.isJsonArray() || !isString(updatedAt)) {
                 return Optional.empty();
             }
-            return Optional.of(new BanList(entries(bans.getAsJsonArray()), Instant.parse(updatedAt.getAsString())));
+            return Optional.of(new BanList(
+                    entries(bans.getAsJsonArray()),
+                    Instant.parse(updatedAt.getAsString()),
+                    isTrue(object.get("require_launcher"))));
         } catch (JsonParseException | IllegalStateException | DateTimeParseException e) {
             return Optional.empty();
         }
@@ -107,7 +116,15 @@ public final class BanList {
         });
         root.add("bans", array);
         root.addProperty("updated_at", updatedAt.toString());
+        root.addProperty("require_launcher", requireLauncher);
         return root.toString();
+    }
+
+    private static boolean isTrue(JsonElement element) {
+        return element != null
+                && element.isJsonPrimitive()
+                && element.getAsJsonPrimitive().isBoolean()
+                && element.getAsBoolean();
     }
 
     private static boolean isString(JsonElement element) {
@@ -121,16 +138,16 @@ public final class BanList {
         if (!(other instanceof BanList that)) {
             return false;
         }
-        return bans.equals(that.bans) && updatedAt.equals(that.updatedAt);
+        return bans.equals(that.bans) && updatedAt.equals(that.updatedAt) && requireLauncher == that.requireLauncher;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(bans, updatedAt);
+        return Objects.hash(bans, updatedAt, requireLauncher);
     }
 
     @Override
     public String toString() {
-        return "BanList[" + bans.size() + " bans as of " + updatedAt + "]";
+        return "BanList[" + bans.size() + " bans as of " + updatedAt + ", requireLauncher=" + requireLauncher + "]";
     }
 }

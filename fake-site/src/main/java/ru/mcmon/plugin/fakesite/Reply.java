@@ -54,6 +54,10 @@ public record Reply(
     public record BanEntry(String player, String reason, Instant until) {}
 
     public static Reply bans(String updatedAt, BanEntry... entries) {
+        return bans(updatedAt, false, entries);
+    }
+
+    public static Reply bans(String updatedAt, boolean requireLauncher, BanEntry... entries) {
         JsonObject root = new JsonObject();
         JsonArray array = new JsonArray();
         for (BanEntry entry : entries) {
@@ -69,6 +73,7 @@ public record Reply(
         }
         root.add("bans", array);
         root.addProperty("updated_at", updatedAt);
+        root.addProperty("require_launcher", requireLauncher);
         return status(200, root.toString());
     }
 

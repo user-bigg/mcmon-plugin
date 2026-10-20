@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Runs the fake MC Monitor site for manual testing: scripts/fake-site [port] (key: FAKE_SITE_KEY, default dev-key).
+# Runs the fake MC Monitor site for manual testing: scripts/fake-site [port] (key: FAKE_SITE_KEY, default dev-key;
+# launcher-only mode is on while the file FAKE_SITE_LAUNCHER_ONLY_FILE exists).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ./gradlew -q :fake-site:shadowJar

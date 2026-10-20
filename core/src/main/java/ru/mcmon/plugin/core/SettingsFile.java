@@ -27,10 +27,6 @@ public final class SettingsFile {
 
             # Language of player messages: ru, en, es, pt, de. Texts are in the messages folder; the console is always in English.
             language: ru
-
-            # true: let in only confirmed players, those who join through the MC Monitor launcher.
-            # Bans from the dashboard work either way. If the site is down, everyone gets in except players with a saved ban.
-            require-launcher: false
             """;
 
     private static final Set<String> LANGUAGES = Set.of("ru", "en", "es", "pt", "de");
@@ -57,18 +53,7 @@ public final class SettingsFile {
                 siteUrl(values.getOrDefault("site-url", defaults.siteUrl().toString())),
                 timeout(values.getOrDefault(
                         "timeout-ms", Long.toString(defaults.timeout().toMillis()))),
-                language(values.getOrDefault("language", defaults.language())),
-                flag(
-                        "require-launcher",
-                        values.getOrDefault("require-launcher", Boolean.toString(defaults.requireLauncher()))));
-    }
-
-    private static boolean flag(String key, String value) {
-        return switch (PlainText.strip(value).toLowerCase(Locale.ROOT)) {
-            case "true", "yes", "on" -> true;
-            case "false", "no", "off" -> false;
-            default -> throw new SettingsException(key + " must be true or false");
-        };
+                language(values.getOrDefault("language", defaults.language())));
     }
 
     private static String serverKey(String value) {

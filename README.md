@@ -10,7 +10,7 @@ For a join with a launch code the plugin sends the site exactly two things: the 
 
 The launch code comes from the game: before each start the MC Monitor launcher gets a code for one catalog server and puts the MC Monitor client mod into the game (Fabric, see [Client mod](#client-mod)). While logging in, the plugin asks the game over the login channel `mcmonitor:play`, and the mod answers with the code. Players install nothing themselves. A game without the mod (another launcher, Forge, a version without Fabric) answers that it does not know the channel; for the plugin such a player is someone who did not come through the launcher.
 
-The site answers with facts: whether the player is confirmed by the launcher, the player's number on your server (16 hex digits, the same for one account on one server, different on every other server), and the ban with its reason and end date if the owner set one in the dashboard. A ban applies to the account and to the computers that account played from.
+The site answers with facts: whether the player is confirmed by the launcher, the player's number on your server (16 hex digits, the same for one account on one server, different on every other server), and the ban with its reason and end date if the owner set one in the dashboard. A ban applies to the account and to the computers that account played from. Every 5 minutes the plugin also fetches the ban list of your server and whether launcher-only mode is turned on in the dashboard.
 
 The plugin never receives e-mail addresses, account ids, hardware details or anything about the player's other servers. The server key, launch codes and player IP addresses never appear in the log, and launch codes are not stored on disk.
 
@@ -22,14 +22,12 @@ Skins and capes from MC Monitor are shown by the client-side mod in the game. Th
 
 Your server must let players in by nickname: `online-mode=false` in `server.properties`, or on a proxy `online-mode = false` in `velocity.toml` and `online_mode: false` in BungeeCord's `config.yml`. Velocity and BungeeCord ship with it on.
 
-1. Download the file for your platform:
-   - `mcmonitor-bukkit-<version>.jar` for Paper, Spigot and their forks;
-   - `mcmonitor-proxy-<version>.jar` for Velocity and BungeeCord.
+1. Download `mcmonitor-plugin-<version>.jar`. The same file works on Paper, Spigot, Folia, Arclight, Velocity and BungeeCord.
 2. Put it into `plugins/` and start the server once. The plugin writes `config.yml` and the message files.
 3. Open your server in the MC Monitor dashboard, copy the server key and paste it into `server-key` in `plugins/MCMonitor/config.yml` (`plugins/mcmonitor/config.yml` on Velocity). The key stops working when the server changes owner on the site: the new owner takes a fresh key from the dashboard, and until then the log says the site rejected the key.
 4. Restart the server. Within a few seconds the log shows `connected to the site: …`: the site accepted the key. If it shows `could not update bans (site rejected the server key)` instead, check the key you pasted.
 
-On a network with a proxy install the proxy jar on the proxy only. The game answers the launch code request of the server it connects to, which is the proxy; Velocity and BungeeCord do not pass a backend's request on to the game. A Bukkit jar on a backend therefore never gets a code and is of no use there. When the Bukkit jar sees `settings.bungeecord: true` in `spigot.yml` or Velocity forwarding in Paper's settings, it says so in the log at startup, does not ask for launch codes and ignores `require-launcher`, so it never keeps players out for lack of a code.
+On a network with a proxy install the plugin on the proxy only. The game answers the launch code request of the server it connects to, which is the proxy; Velocity and BungeeCord do not pass a backend's request on to the game. The plugin on a backend therefore never gets a code and is of no use there. When the plugin on a Bukkit server sees `settings.bungeecord: true` in `spigot.yml` or Velocity forwarding in Paper's settings, it says so in the log at startup, does not ask for launch codes and ignores launcher-only mode, so it never keeps players out for lack of a code.
 
 ## Settings
 
@@ -41,13 +39,14 @@ On a network with a proxy install the proxy jar on the proxy only. The game answ
 | `site-url` | `https://mc-mon.ru` | Site address. Change it only to test against a fake site. |
 | `timeout-ms` | `2000` | How long to wait for the site (100–5000 ms). After that the player is handled by the server as usual, as if the site were unreachable. The plugin waits the same time for the game to answer the launch code request; a game that does not answer in time counts as a game without the mod. |
 | `language` | `ru` | Language of messages to players: `ru`, `en`, `es`, `pt`, `de`. Console messages stay in English. |
-| `require-launcher` | `false` | `true` lets in only players confirmed by the launcher. When the site does not answer, everyone except already known banned players gets in as if the plugin were absent. |
+
+Launcher-only mode lets in only players confirmed by the launcher. It is turned on and off in the server dashboard on MC Monitor, not in `config.yml`. The plugin picks the change up with the ban list within 5 minutes and keeps it in `bans.json`, so the mode stays as it was while the site is down and after a restart. When the site does not answer, everyone except already known banned players gets in as if the plugin were absent.
 
 Messages live in `plugins/MCMonitor/messages/<language>.yml` (`plugins/mcmonitor/messages/` on Velocity). Edit them freely: a key you remove falls back to the built-in text, and texts added by an update are used from the built-in file until you copy them over.
 
 ## How joins are decided
 
-| Site answer | `require-launcher: false` | `require-launcher: true` |
+| Site answer | Launcher-only mode off | Launcher-only mode on |
 |---|---|---|
 | Confirmed, no ban | let in | same |
 | Confirmed, banned | kicked with the reason and end date | same |
@@ -68,7 +67,7 @@ A player the plugin has already seen is checked against the saved ban list (`ban
 |---|---|---|
 | Paper, Spigot, Purpur and other forks | Minecraft 1.18 – 26.3 | 17+ (whatever the server needs) |
 | Folia | 1.21.11 | 21+ |
-| Arclight and other Forge or NeoForge servers with the Bukkit API | the Bukkit jar in `plugins/`; tested on Arclight 1.20.1 (Forge, 1.0.6) and 1.21.1 (NeoForge, 1.0.1) | 17+ / 21+ |
+| Arclight and other Forge or NeoForge servers with the Bukkit API | the plugin in `plugins/`; tested on Arclight 1.20.1 (Forge, 1.0.6) and 1.21.1 (NeoForge, 1.0.1) | 17+ / 21+ |
 | Velocity | 3.5.x, 4.x | 21+ / 25+ |
 | BungeeCord | current builds | 17+ |
 
@@ -79,8 +78,8 @@ How the launch code is asked for:
 | Platform | How | Notes |
 |---|---|---|
 | Velocity 3.5, 4.x | `LoginPhaseConnection#sendLoginPluginMessage` | Velocity holds the login until the game answers; a game that never answers is dropped by Velocity's own `read-timeout` (30 s by default). The vanilla game and the mod answer at once. |
-| BungeeCord | `PendingConnection#sendData` | Builds from September 2024 on. Older builds and Waterfall lack the method: the plugin says so once in the log at startup, cannot ask, and players are handled as usual; `require-launcher` has no effect there. |
-| Paper, Spigot, Folia, Arclight | the plugin's own network handler | Bukkit has no API for this. The handler relies on the server's network channel layout, which has stayed the same on 1.18 – 26.3. If a server build differs, the plugin says so once in the log and handles players as usual (saved bans still apply); `require-launcher` has no effect there. A game that answers after `timeout-ms` is not dropped: the plugin takes the late answer away from the server. |
+| BungeeCord | `PendingConnection#sendData` | Builds from September 2024 on. Older builds and Waterfall lack the method: the plugin says so once in the log at startup, cannot ask, and players are handled as usual; launcher-only mode has no effect there. |
+| Paper, Spigot, Folia, Arclight | the plugin's own network handler | Bukkit has no API for this. The handler relies on the server's network channel layout, which has stayed the same on 1.18 – 26.3. If a server build differs, the plugin says so once in the log and handles players as usual (saved bans still apply); launcher-only mode has no effect there. A game that answers after `timeout-ms` is not dropped: the plugin takes the late answer away from the server. |
 
 The game needs Minecraft 1.13 or newer to answer at all; the MC Monitor mod exists for 1.14 and newer with Fabric. Players on older versions, including everyone on a 1.12.2 server, never have a code: only saved bans apply to them. Games older than 1.13 that join a newer server through ViaVersion and ViaBackwards are handled like games without the mod (tested with 5.12.1 on Paper 26.3).
 
@@ -91,7 +90,7 @@ The game needs Minecraft 1.13 or newer to answer at all; the MC Monitor mod exis
 | `config.yml` | settings |
 | `messages/<language>.yml` | texts shown to players |
 | `players.json` | nickname → last seen player numbers |
-| `bans.json` | the last ban list received from the site |
+| `bans.json` | the last ban list received from the site and whether launcher-only mode is on |
 
 `players.json` and `bans.json` contain no IP addresses, launch codes or server key; the key lives only in `config.yml`.
 
@@ -118,6 +117,10 @@ Open an issue in this repository. Please include the server software and version
 GPL-3.0, see `LICENSE`. The MC Monitor name and logo are not covered by the license.
 
 ## Changelog
+
+### 0.2.0
+- One jar for all platforms, `mcmonitor-plugin-<version>.jar`, instead of separate Bukkit and proxy jars. Remove the old `mcmonitor-bukkit-*.jar` or `mcmonitor-proxy-*.jar` from `plugins/` when you update.
+- Launcher-only mode is turned on in the server dashboard. The `require-launcher` key in `config.yml` is gone; if your `config.yml` still has it, the plugin ignores it, so turn the mode on in the dashboard.
 
 ### 0.1.0
 First version: join check against the site, bans from the dashboard, saved ban list for site outages, launcher-only mode, Folia and Arclight support, messages in Russian, English, Spanish, Portuguese and German.

@@ -27,7 +27,7 @@ public final class MCMonitorBukkitPlugin extends JavaPlugin {
         runtime = started.get();
         if (network.behindProxy()) {
             log.warn("behind a proxy: install the proxy jar on the proxy; this server does not ask for launch codes"
-                    + " and does not apply require-launcher. Saved bans still apply");
+                    + " and does not apply launcher-only mode. Saved bans still apply");
             codes = LaunchCodeQueries.behindProxy(log);
         } else {
             codes = LaunchCodeQueries.install(

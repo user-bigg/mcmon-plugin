@@ -9,7 +9,7 @@ public final class JoinDecision {
         ALLOW("let in"),
         PASS("let in as usual"),
         DENY_BANNED("kept out, banned"),
-        DENY_UNCONFIRMED("kept out, require-launcher is on");
+        DENY_UNCONFIRMED("kept out, launcher-only mode is on");
 
         private final String description;
 

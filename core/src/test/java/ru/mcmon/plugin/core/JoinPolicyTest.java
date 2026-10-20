@@ -46,7 +46,7 @@ class JoinPolicyTest {
 
     @Test
     void knownBanDeniesUnlessTheSiteConfirmedThePlayer() {
-        JoinPolicy policy = new JoinPolicy(Settings.defaults());
+        JoinPolicy policy = new JoinPolicy(() -> false);
 
         assertEquals(
                 JoinDecision.Kind.ALLOW,
@@ -67,7 +67,7 @@ class JoinPolicyTest {
     }
 
     private static JoinDecision.Kind decide(Lookup lookup, boolean requireLauncher) {
-        return new JoinPolicy(Settings.defaults().withRequireLauncher(requireLauncher))
+        return new JoinPolicy(() -> requireLauncher)
                 .decide(lookup, Optional.empty(), NOW)
                 .kind();
     }

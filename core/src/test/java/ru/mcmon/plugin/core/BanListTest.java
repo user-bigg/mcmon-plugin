@@ -1,6 +1,7 @@
 package ru.mcmon.plugin.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Instant;
@@ -28,6 +29,19 @@ class BanListTest {
                 list.find(new PlayerId("7f3a91c202be4d10")).orElseThrow());
         assertTrue(list.find(new PlayerId("0123456789abcdef")).orElseThrow().permanent());
         assertEquals(list, BanList.parse(list.toJson()).orElseThrow());
+    }
+
+    @Test
+    void requiresLauncherOnlyWhenTheSiteSendsTrue() {
+        String bans = "{\"bans\": [], \"updated_at\": \"2026-10-13T10:00:00Z\"";
+        BanList on = BanList.parse(bans + ", \"require_launcher\": true}").orElseThrow();
+
+        assertTrue(on.requireLauncher());
+        assertEquals(on, BanList.parse(on.toJson()).orElseThrow());
+        assertFalse(BanList.parse(bans + "}").orElseThrow().requireLauncher());
+        assertFalse(BanList.parse(bans + ", \"require_launcher\": \"true\"}")
+                .orElseThrow()
+                .requireLauncher());
     }
 
     @Test

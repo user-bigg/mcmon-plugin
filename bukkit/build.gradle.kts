@@ -38,6 +38,7 @@ tasks.processResources {
 tasks.shadowJar {
     archiveBaseName = "mcmonitor-bukkit"
     archiveClassifier = ""
+    destinationDirectory = layout.buildDirectory.dir("parts")
     dependencies {
         exclude(dependency("com.google.code.gson:gson"))
     }

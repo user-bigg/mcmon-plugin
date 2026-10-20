@@ -6,7 +6,7 @@ Thank you for your interest. Right now the project accepts issues only: bug repo
 
 Open an issue with:
 - server software and version (for example `Paper 26.3 build 178`, `Velocity 4.2.0`, `Arclight 1.21.1`);
-- plugin version, as in the jar name (for example `mcmonitor-bukkit-0.1.0.jar`);
+- plugin version, as in the jar name (for example `mcmonitor-plugin-0.2.0.jar`);
 - the login plugin and its version, if any;
 - `config.yml` without the server key;
 - log lines around the problem. The plugin never writes the key or player addresses to the log, so copying them is safe.
@@ -19,7 +19,7 @@ Requirements: any JDK 17 or newer to start the Gradle wrapper, Python 3 for the 
 ./gradlew build
 ```
 
-builds `bukkit/build/libs/mcmonitor-bukkit-<version>.jar`, `proxy/build/libs/mcmonitor-proxy-<version>.jar`, the client mod jars in `client-fabric/*/build/libs/` and runs the unit tests.
+builds the plugin jar `plugin/build/libs/mcmonitor-plugin-<version>.jar` (Bukkit, Velocity and BungeeCord in one file), the client mod jars in `client-fabric/*/build/libs/` and runs the unit tests.
 
 ```
 scripts/check
@@ -29,7 +29,7 @@ also formats, compiles with all lint warnings as errors, compiles the Velocity m
 
 `scripts/client-smoke` starts a real Fabric client with the mod in a linux/amd64 container and checks that the code reaches only the server it is meant for. It is slow and not part of `scripts/check`.
 
-`scripts/fake-site` starts a fake MC Monitor site on port 8089 for manual testing; point `site-url` at it and use the key `dev-key`.
+`scripts/fake-site` starts a fake MC Monitor site on port 8089 for manual testing; point `site-url` at it and use the key `dev-key`. Nicknames starting with `Guest` are not confirmed, `Banned` are banned, `Slow` get the answer after 5 s. With `FAKE_SITE_LAUNCHER_ONLY_FILE=<path>` launcher-only mode is on while that file exists.
 
 ## Code rules
 

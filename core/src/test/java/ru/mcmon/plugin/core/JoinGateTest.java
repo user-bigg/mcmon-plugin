@@ -36,8 +36,7 @@ class JoinGateTest {
                 .withServerKey(KEY)
                 .withSiteUrl(site.baseUrl())
                 .withTimeout(Duration.ofMillis(300))
-                .withLanguage("en")
-                .withRequireLauncher(true);
+                .withLanguage("en");
         client = new HttpSiteClient(settings, "test");
         log = new RecordingLog();
         players = PlayerStore.open(dir.resolve("players.json"), log);
@@ -108,7 +107,7 @@ class JoinGateTest {
     void brokenMessagesStillDenyWithBuiltInText() {
         Messages broken = Messages.of(java.util.Map.of(), "en", ZoneId.of("UTC"));
         JoinGate gate = new JoinGate(
-                new PlayerJoinCheck(settings, client, log), new JoinPolicy(settings), players, bans, broken, log);
+                new PlayerJoinCheck(settings, client, log), new JoinPolicy(() -> true), players, bans, broken, log);
         site.replyWith(Reply.banned(PLAYER, "Steve_Miner", "grief", null));
 
         JoinVerdict verdict = gate.await("Steve_Miner", Codes.answered());
@@ -121,7 +120,7 @@ class JoinGateTest {
     private JoinGate gate() {
         return new JoinGate(
                 new PlayerJoinCheck(settings, client, log),
-                new JoinPolicy(settings),
+                new JoinPolicy(() -> true),
                 players,
                 bans,
                 Messages.load("en", ZoneId.of("UTC")),

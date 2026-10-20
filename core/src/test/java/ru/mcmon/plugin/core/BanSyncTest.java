@@ -61,6 +61,19 @@ class BanSyncTest {
     }
 
     @Test
+    void keepsTheSitesRequireLauncherAcrossRestartWithoutSite() {
+        site.replyToBansWith(Reply.bans("2026-10-13T10:00:00Z", true));
+        BanSync sync = BanSync.open(client, file, log);
+
+        sync.refresh().join();
+
+        assertTrue(sync.current().requireLauncher());
+        assertTrue(log.text().contains("INFO launcher-only mode turned on by the site"), log.text());
+        site.close();
+        assertTrue(BanSync.open(client, file, log).current().requireLauncher());
+    }
+
+    @Test
     void appliesAnyValidListKeepsSavedOneOnBrokenAnswersAndWarnsOnce() {
         site.replyToBansWith(Reply.bans("2026-10-13T10:00:00Z", new Reply.BanEntry(CARL.hex(), "grief", null)));
         BanSync sync = BanSync.open(client, file, log);

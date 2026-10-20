@@ -1,0 +1,67 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check that the tag matches the project version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          grep -q "version = \"$version\"" build.gradle.kts || {
+            echo "Tag $GITHUB_REF_NAME does not match the version in build.gradle.kts" >&2
+            exit 1
+          }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Build and run the unit tests
+        run: ./gradlew build --no-daemon
+
+      - name: Collect the release files
+        run: |
+          mkdir release
+          cp "plugin/build/libs/mcmonitor-plugin-$VERSION.jar" release/
+          # The site and the launcher fetch the mod by these names from every release.
+          for line in mc1.14 mc1.20.2 mc26.1; do
+            cp "client-fabric/$line/build/libs/mcmonitor-client-fabric-$line-$VERSION.jar" release/
+          done
+          cd release
+          sha256sum *.jar > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Take the release notes from the changelog
+        run: |
+          awk -v heading="### $VERSION" '
+            $0 == heading { found = 1; next }
+            found && /^##/ { exit }
+            found { print }
+          ' README.md > notes.md
+          [ -s notes.md ] || { echo "README.md has no changelog for $VERSION" >&2; exit 1; }
+          cat >> notes.md <<NOTES
+
+          Setup and settings: see the [README](https://github.com/$GITHUB_REPOSITORY#install-in-five-minutes).
+
+          | File | For |
+          |---|---|
+          | \`mcmonitor-plugin-$VERSION.jar\` | Paper, Spigot, Purpur, Folia, Arclight, Velocity, BungeeCord |
+          | \`mcmonitor-client-fabric-mc1.14-$VERSION.jar\` | client mod, Minecraft 1.14 – 1.20.1 |
+          | \`mcmonitor-client-fabric-mc1.20.2-$VERSION.jar\` | client mod, Minecraft 1.20.2 – 1.21.11 |
+          | \`mcmonitor-client-fabric-mc26.1-$VERSION.jar\` | client mod, Minecraft 26.1 and newer |
+
+          Players do not install the client mod themselves: the MC Monitor launcher adds it to the game.
+          NOTES
+
+      - name: Create a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release/* --draft --verify-tag --title "$GITHUB_REF_NAME" --notes-file notes.md
